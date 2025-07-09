@@ -54,13 +54,18 @@ async function getDashboardData(userId: string) {
 }
 
 export default async function Dashboard() {
-  const session = await getServerSession(authOptions)
+  try {
+    const session = await getServerSession(authOptions)
 
-  if (!session) {
+    if (!session?.user?.id) {
+      redirect("/auth/signin")
+    }
+
+    const dashboardData = await getDashboardData(session.user.id)
+
+    return <DashboardContent data={dashboardData} user={session.user} />
+  } catch (error) {
+    console.error("Dashboard error:", error)
     redirect("/auth/signin")
   }
-
-  const dashboardData = await getDashboardData(session.user.id)
-
-  return <DashboardContent data={dashboardData} user={session.user} />
 }

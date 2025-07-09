@@ -3,13 +3,14 @@
 import type React from "react"
 
 import { useState } from "react"
-import { signIn } from "next-auth/react"
+import { signIn, getSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Loader2 } from "lucide-react"
 
 export default function SignIn() {
   const [email, setEmail] = useState("")
@@ -20,8 +21,8 @@ export default function SignIn() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
     setError("")
+    setLoading(true)
 
     try {
       const result = await signIn("credentials", {
@@ -31,11 +32,19 @@ export default function SignIn() {
       })
 
       if (result?.error) {
-        setError("Invalid credentials")
+        setError("Invalid credentials. Please try again.")
       } else {
-        router.push("/dashboard")
+        // Verify session was created
+        const session = await getSession()
+        if (session) {
+          router.push("/dashboard")
+          router.refresh()
+        } else {
+          setError("Session creation failed. Please try again.")
+        }
       }
     } catch (error) {
+      console.error("Sign in error:", error)
       setError("An error occurred. Please try again.")
     } finally {
       setLoading(false)
@@ -45,24 +54,36 @@ export default function SignIn() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Sign In</CardTitle>
-          <CardDescription>Enter your credentials to access the PMS system</CardDescription>
+        <CardHeader className="space-y-1">
+          <CardTitle className="text-2xl font-bold text-center">Sign In</CardTitle>
+          <CardDescription className="text-center">
+            Enter your credentials to access the Project Management System
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <Input
+                id="email"
+                type="email"
+                placeholder="admin@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                disabled={loading}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
                 type="password"
+                placeholder="password123"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                disabled={loading}
               />
             </div>
             {error && (
@@ -71,15 +92,20 @@ export default function SignIn() {
               </Alert>
             )}
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Signing in..." : "Sign In"}
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Signing in...
+                </>
+              ) : (
+                "Sign In"
+              )}
             </Button>
           </form>
-          <div className="mt-4 text-sm text-gray-600">
-            <p>Demo accounts:</p>
-            <p>admin@company.com (Admin)</p>
-            <p>pm1@company.com (Project Manager)</p>
-            <p>dev1@company.com (Developer)</p>
-            <p>Password: any password</p>
+          <div className="mt-4 text-sm text-gray-600 text-center">
+            <p>Demo credentials:</p>
+            <p>Email: admin@example.com</p>
+            <p>Password: password123</p>
           </div>
         </CardContent>
       </Card>
