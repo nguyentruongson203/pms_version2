@@ -11,14 +11,11 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
-          console.log("Missing credentials")
+        if (!credentials?.email) {
           return null
         }
 
         try {
-          console.log("Attempting to authenticate:", credentials.email)
-
           const [rows] = await db.execute("SELECT * FROM users WHERE email = ? AND is_active = TRUE", [
             credentials.email,
           ])
@@ -26,23 +23,18 @@ export const authOptions: NextAuthOptions = {
           const users = rows as any[]
           const user = users[0]
 
-          console.log("User found:", user ? "Yes" : "No")
-
-          if (!user) {
-            console.log("No user found with email:", credentials.email)
-            return null
+          if (user) {
+            // For demo - accept any password. In production, use bcrypt.compare
+            return {
+              id: user.id.toString(),
+              email: user.email,
+              name: user.name,
+              role: user.role,
+              avatar_url: user.avatar_url,
+            }
           }
 
-          // For demo purposes, we'll accept any password for existing users
-          // In production, use bcrypt.compare(credentials.password, user.password_hash)
-          console.log("User authenticated successfully:", user.email)
-
-          return {
-            id: user.id.toString(),
-            email: user.email,
-            name: user.name,
-            role: user.role,
-          }
+          return null
         } catch (error) {
           console.error("Auth error:", error)
           return null
@@ -50,6 +42,13 @@ export const authOptions: NextAuthOptions = {
       },
     }),
   ],
+  session: {
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+  },
+  jwt: {
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+  },
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
@@ -59,7 +58,7 @@ export const authOptions: NextAuthOptions = {
       return token
     },
     async session({ session, token }) {
-      if (token && session.user) {
+      if (token) {
         session.user.id = token.id as string
         session.user.role = token.role as string
       }
@@ -68,11 +67,7 @@ export const authOptions: NextAuthOptions = {
   },
   pages: {
     signIn: "/auth/signin",
-  },
-  session: {
-    strategy: "jwt",
-    maxAge: 30 * 24 * 60 * 60, // 30 days
+    error: "/auth/signin",
   },
   secret: process.env.NEXTAUTH_SECRET,
-  debug: process.env.NODE_ENV === "development",
 }

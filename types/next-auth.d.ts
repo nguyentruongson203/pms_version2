@@ -5,6 +5,7 @@ declare module "next-auth" {
       email: string
       name: string
       role: string
+      avatar_url?: string
     }
   }
 
@@ -13,6 +14,7 @@ declare module "next-auth" {
     email: string
     name: string
     role: string
+    avatar_url?: string
   }
 }
 

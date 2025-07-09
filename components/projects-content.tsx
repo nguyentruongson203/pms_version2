@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Progress } from "@/components/ui/progress"
-import { Plus, Search, Users, Calendar, DollarSign } from "lucide-react"
+import { Search, Users, Calendar, DollarSign } from "lucide-react"
+import { CreateProjectDialog } from "./create-project-dialog"
 import Link from "next/link"
 
 interface ProjectsContentProps {
@@ -63,10 +64,7 @@ export function ProjectsContent({ projects, user }: ProjectsContentProps) {
               </Link>
               <h1 className="text-2xl font-bold text-gray-900">Projects</h1>
             </div>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              New Project
-            </Button>
+            <CreateProjectDialog />
           </div>
         </div>
       </header>

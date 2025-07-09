@@ -1,13 +1,13 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Calendar, Clock, Plus } from "lucide-react"
+import { Calendar, Clock } from "lucide-react"
+import { CreateTaskDialog } from "./create-task-dialog"
+import { TaskDetailDialog } from "./task-detail-dialog"
 import Link from "next/link"
 
 interface KanbanBoardProps {
@@ -27,6 +27,8 @@ const COLUMNS = [
 
 export function KanbanBoard({ tasks, project, user }: KanbanBoardProps) {
   const [taskList, setTaskList] = useState(tasks)
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
+  const [taskDetailOpen, setTaskDetailOpen] = useState(false)
 
   const getPriorityColor = (priority: string) => {
     const colors = {
@@ -53,10 +55,26 @@ export function KanbanBoard({ tasks, project, user }: KanbanBoardProps) {
     e.preventDefault()
     const taskId = Number.parseInt(e.dataTransfer.getData("text/plain"))
 
+    // Update local state immediately
     setTaskList((prev) => prev.map((task) => (task.id === taskId ? { ...task, status: newStatus } : task)))
 
-    // Here you would typically make an API call to update the task status
-    // await updateTaskStatus(taskId, newStatus)
+    // Update in database
+    try {
+      await fetch(`/api/tasks/${taskId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      })
+    } catch (error) {
+      console.error("Failed to update task status:", error)
+      // Revert on error
+      setTaskList((prev) => prev.map((task) => (task.id === taskId ? { ...task, status: task.status } : task)))
+    }
+  }
+
+  const handleTaskClick = (taskId: number) => {
+    setSelectedTaskId(taskId)
+    setTaskDetailOpen(true)
   }
 
   return (
@@ -74,10 +92,7 @@ export function KanbanBoard({ tasks, project, user }: KanbanBoardProps) {
                 <p className="text-sm text-gray-600">{project.project_code} - Kanban Board</p>
               </div>
             </div>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Task
-            </Button>
+            <CreateTaskDialog projectId={project.id} />
           </div>
         </div>
       </header>
@@ -105,6 +120,7 @@ export function KanbanBoard({ tasks, project, user }: KanbanBoardProps) {
                     className="cursor-move hover:shadow-md transition-shadow"
                     draggable
                     onDragStart={(e) => handleDragStart(e, task.id)}
+                    onClick={() => handleTaskClick(task.id)}
                   >
                     <CardHeader className="pb-2">
                       <div className="flex justify-between items-start">
@@ -146,7 +162,7 @@ export function KanbanBoard({ tasks, project, user }: KanbanBoardProps) {
 
                       {task.tags && task.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-2">
-                          {task.tags.map((tag: string, index: number) => (
+                          {JSON.parse(task.tags).map((tag: string, index: number) => (
                             <Badge key={index} variant="outline" className="text-xs">
                               {tag}
                             </Badge>
@@ -161,6 +177,8 @@ export function KanbanBoard({ tasks, project, user }: KanbanBoardProps) {
           ))}
         </div>
       </div>
+
+      <TaskDetailDialog taskId={selectedTaskId} open={taskDetailOpen} onOpenChange={setTaskDetailOpen} />
     </div>
   )
 }
