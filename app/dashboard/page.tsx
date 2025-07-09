@@ -1,8 +1,8 @@
-import { getServerSession } from "next-auth"
-import { redirect } from "next/navigation"
+import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
+import { redirect } from "next/navigation"
+import DashboardContent from "@/components/dashboard-content"
 import db from "@/lib/db"
-import { DashboardContent } from "@/components/dashboard-content"
 
 async function getDashboardData(userId: string) {
   try {
@@ -54,18 +54,13 @@ async function getDashboardData(userId: string) {
 }
 
 export default async function Dashboard() {
-  try {
-    const session = await getServerSession(authOptions)
+  const session = await getServerSession(authOptions)
 
-    if (!session?.user?.id) {
-      redirect("/auth/signin")
-    }
-
-    const dashboardData = await getDashboardData(session.user.id)
-
-    return <DashboardContent data={dashboardData} user={session.user} />
-  } catch (error) {
-    console.error("Dashboard error:", error)
+  if (!session) {
     redirect("/auth/signin")
   }
+
+  const dashboardData = await getDashboardData(session.user.id)
+
+  return <DashboardContent session={session} data={dashboardData} />
 }

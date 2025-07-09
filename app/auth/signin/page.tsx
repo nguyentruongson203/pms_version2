@@ -25,17 +25,24 @@ export default function SignIn() {
     setLoading(true)
 
     try {
+      console.log("Attempting sign in with:", email)
+
       const result = await signIn("credentials", {
         email,
         password,
         redirect: false,
       })
 
+      console.log("Sign in result:", result)
+
       if (result?.error) {
-        setError("Invalid credentials. Please try again.")
+        console.error("Sign in error:", result.error)
+        setError("Invalid credentials. Please check your email and try again.")
       } else if (result?.ok) {
+        console.log("Sign in successful, redirecting...")
         // Wait for session to be established
         const session = await getSession()
+        console.log("Session after sign in:", session)
         if (session) {
           router.push("/dashboard")
           router.refresh()
@@ -47,6 +54,11 @@ export default function SignIn() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleDemoLogin = (demoEmail: string) => {
+    setEmail(demoEmail)
+    setPassword("demo123")
   }
 
   return (
@@ -65,7 +77,7 @@ export default function SignIn() {
               <Input
                 id="email"
                 type="email"
-                placeholder="admin@example.com"
+                placeholder="admin@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -77,7 +89,7 @@ export default function SignIn() {
               <Input
                 id="password"
                 type="password"
-                placeholder="password123"
+                placeholder="Enter any password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -100,16 +112,39 @@ export default function SignIn() {
               )}
             </Button>
           </form>
+
           <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-            <h3 className="text-sm font-medium text-blue-900 mb-2">Demo Credentials:</h3>
-            <div className="text-xs text-blue-700 space-y-1">
-              <div>
-                <strong>Email:</strong> admin@example.com
-              </div>
-              <div>
-                <strong>Password:</strong> password123
-              </div>
+            <h3 className="text-sm font-medium text-blue-900 mb-3">Demo Accounts:</h3>
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-xs bg-transparent"
+                onClick={() => handleDemoLogin("admin@company.com")}
+                disabled={loading}
+              >
+                Admin: admin@company.com
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-xs bg-transparent"
+                onClick={() => handleDemoLogin("pm1@company.com")}
+                disabled={loading}
+              >
+                PM: pm1@company.com
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-xs bg-transparent"
+                onClick={() => handleDemoLogin("dev1@company.com")}
+                disabled={loading}
+              >
+                Dev: dev1@company.com
+              </Button>
             </div>
+            <p className="text-xs text-blue-600 mt-2">Password: Enter any password (demo mode)</p>
           </div>
         </CardContent>
       </Card>

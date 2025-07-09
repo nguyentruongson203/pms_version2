@@ -12,10 +12,13 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
+          console.log("Missing credentials")
           return null
         }
 
         try {
+          console.log("Attempting to authenticate:", credentials.email)
+
           const [rows] = await db.execute("SELECT * FROM users WHERE email = ? AND is_active = TRUE", [
             credentials.email,
           ])
@@ -23,15 +26,16 @@ export const authOptions: NextAuthOptions = {
           const users = rows as any[]
           const user = users[0]
 
+          console.log("User found:", user ? "Yes" : "No")
+
           if (!user) {
+            console.log("No user found with email:", credentials.email)
             return null
           }
 
-          // For demo purposes, we'll skip password hashing
+          // For demo purposes, we'll accept any password for existing users
           // In production, use bcrypt.compare(credentials.password, user.password_hash)
-          if (credentials.password !== "password123") {
-            return null
-          }
+          console.log("User authenticated successfully:", user.email)
 
           return {
             id: user.id.toString(),
