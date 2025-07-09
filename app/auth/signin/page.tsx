@@ -33,14 +33,12 @@ export default function SignIn() {
 
       if (result?.error) {
         setError("Invalid credentials. Please try again.")
-      } else {
-        // Verify session was created
+      } else if (result?.ok) {
+        // Wait for session to be established
         const session = await getSession()
         if (session) {
           router.push("/dashboard")
           router.refresh()
-        } else {
-          setError("Session creation failed. Please try again.")
         }
       }
     } catch (error) {
@@ -52,10 +50,10 @@ export default function SignIn() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center">Sign In</CardTitle>
+          <CardTitle className="text-2xl font-bold text-center">Sign in</CardTitle>
           <CardDescription className="text-center">
             Enter your credentials to access the Project Management System
           </CardDescription>
@@ -98,14 +96,20 @@ export default function SignIn() {
                   Signing in...
                 </>
               ) : (
-                "Sign In"
+                "Sign in"
               )}
             </Button>
           </form>
-          <div className="mt-4 text-sm text-gray-600 text-center">
-            <p>Demo credentials:</p>
-            <p>Email: admin@example.com</p>
-            <p>Password: password123</p>
+          <div className="mt-6 p-4 bg-blue-50 rounded-lg">
+            <h3 className="text-sm font-medium text-blue-900 mb-2">Demo Credentials:</h3>
+            <div className="text-xs text-blue-700 space-y-1">
+              <div>
+                <strong>Email:</strong> admin@example.com
+              </div>
+              <div>
+                <strong>Password:</strong> password123
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
