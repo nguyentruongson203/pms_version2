@@ -1,93 +1,77 @@
 "use client"
 
-import type React from "react"
 import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Calendar, Clock, User, MessageCircle, Send, Reply } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
+import { Calendar, User, MessageSquare, Reply, AtSign, Send, Upload } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
+import { useRouter } from "next/navigation"
+import { MarkdownRenderer } from "./markdown-renderer"
+import { FileUploadDialog } from "./file-upload-dialog"
 
-interface TaskDetailDialogProps {
+interface EnhancedTaskDetailDialogProps {
   taskId: number | null
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-interface Comment {
-  id: number
-  content: string
-  user_name: string
-  user_email: string
-  created_at: string
-  parent_comment_id?: number
-  parent_content?: string
-  parent_user_name?: string
-  mentioned_users?: number[]
-}
-
-interface TaskDetail {
-  task: any
-  comments: Comment[]
-  timeEntries: any[]
-}
-
-export function EnhancedTaskDetailDialog({ taskId, open, onOpenChange }: TaskDetailDialogProps) {
-  const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null)
+export function EnhancedTaskDetailDialog({ taskId, open, onOpenChange }: EnhancedTaskDetailDialogProps) {
+  const [task, setTask] = useState<any>(null)
+  const [comments, setComments] = useState<any[]>([])
+  const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [newComment, setNewComment] = useState("")
   const [replyingTo, setReplyingTo] = useState<number | null>(null)
-  const [submittingComment, setSubmittingComment] = useState(false)
-  const [statusColors, setStatusColors] = useState<Record<string, any>>({})
-  const [users, setUsers] = useState<any[]>([])
-  const [showUserSuggestions, setShowUserSuggestions] = useState(false)
-  const [userSuggestions, setUserSuggestions] = useState<any[]>([])
+  const [mentionSuggestions, setMentionSuggestions] = useState<any[]>([])
+  const [showMentions, setShowMentions] = useState(false)
   const [mentionQuery, setMentionQuery] = useState("")
+  const [fileUploadOpen, setFileUploadOpen] = useState(false)
+  const router = useRouter()
 
   useEffect(() => {
-    if (open && taskId) {
-      fetchTaskDetail()
-      fetchStatusColors()
-      fetchUsers()
+    if (taskId && open) {
+      loadTaskDetails()
+      loadComments()
+      loadUsers()
     }
-  }, [open, taskId])
+  }, [taskId, open])
 
-  const fetchTaskDetail = async () => {
+  const loadTaskDetails = async () => {
     if (!taskId) return
 
-    setLoading(true)
     try {
       const response = await fetch(`/api/tasks/${taskId}`)
       if (response.ok) {
         const data = await response.json()
-        setTaskDetail(data)
+        setTask(data)
       }
     } catch (error) {
-      console.error("Error fetching task detail:", error)
-    } finally {
-      setLoading(false)
+      console.error("Failed to load task details:", error)
     }
   }
 
-  const fetchStatusColors = async () => {
+  const loadComments = async () => {
+    if (!taskId) return
+
     try {
-      const response = await fetch("/api/status-colors?type=task")
+      const response = await fetch(`/api/comments?task_id=${taskId}`)
       if (response.ok) {
-        const colors = await response.json()
-        const colorMap = colors.reduce((acc: any, color: any) => {
-          acc[color.status_value] = color
-          return acc
-        }, {})
-        setStatusColors(colorMap)
+        const data = await response.json()
+        setComments(data)
       }
     } catch (error) {
-      console.error("Error fetching status colors:", error)
+      console.error("Failed to load comments:", error)
     }
   }
 
-  const fetchUsers = async () => {
+  const loadUsers = async () => {
     try {
       const response = await fetch("/api/users")
       if (response.ok) {
@@ -95,7 +79,7 @@ export function EnhancedTaskDetailDialog({ taskId, open, onOpenChange }: TaskDet
         setUsers(data)
       }
     } catch (error) {
-      console.error("Error fetching users:", error)
+      console.error("Failed to load users:", error)
     }
   }
 
@@ -108,14 +92,14 @@ export function EnhancedTaskDetailDialog({ taskId, open, onOpenChange }: TaskDet
       const query = value.substring(lastAtIndex + 1)
       if (query.length > 0) {
         const filtered = users.filter((user) => user.name.toLowerCase().includes(query.toLowerCase()))
-        setUserSuggestions(filtered)
+        setMentionSuggestions(filtered.slice(0, 5))
         setMentionQuery(query)
-        setShowUserSuggestions(true)
+        setShowMentions(true)
       } else {
-        setShowUserSuggestions(false)
+        setShowMentions(false)
       }
     } else {
-      setShowUserSuggestions(false)
+      setShowMentions(false)
     }
   }
 
@@ -124,14 +108,13 @@ export function EnhancedTaskDetailDialog({ taskId, open, onOpenChange }: TaskDet
     const beforeMention = newComment.substring(0, lastAtIndex)
     const afterMention = newComment.substring(lastAtIndex + mentionQuery.length + 1)
     setNewComment(`${beforeMention}@${user.name} ${afterMention}`)
-    setShowUserSuggestions(false)
+    setShowMentions(false)
   }
 
-  const handleSubmitComment = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newComment.trim() || !taskId) return
+  const submitComment = async () => {
+    if (!newComment.trim()) return
 
-    setSubmittingComment(true)
+    setLoading(true)
     try {
       const response = await fetch("/api/comments", {
         method: "POST",
@@ -144,29 +127,43 @@ export function EnhancedTaskDetailDialog({ taskId, open, onOpenChange }: TaskDet
       })
 
       if (response.ok) {
-        const comment = await response.json()
-        setTaskDetail((prev) =>
-          prev
-            ? {
-                ...prev,
-                comments: [...prev.comments, comment],
-              }
-            : null,
-        )
         setNewComment("")
         setReplyingTo(null)
+        loadComments()
+      } else {
+        const error = await response.json()
+        alert(error.error || "Failed to add comment")
       }
     } catch (error) {
-      console.error("Error submitting comment:", error)
+      console.error("Comment submission error:", error)
+      alert("Failed to add comment")
     } finally {
-      setSubmittingComment(false)
+      setLoading(false)
     }
   }
 
-  const getStatusColor = (status: string) => {
-    const statusColor = statusColors[status]
-    if (statusColor) {
-      return `${statusColor.bg_color} ${statusColor.text_color}`
+  const updateTaskStatus = async (status: string) => {
+    if (!taskId) return
+
+    try {
+      const response = await fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      })
+
+      if (response.ok) {
+        loadTaskDetails()
+        router.refresh()
+      }
+    } catch (error) {
+      console.error("Failed to update task status:", error)
+    }
+  }
+
+  const getStatusColor = (status: string, bgColor?: string, textColor?: string) => {
+    if (bgColor && textColor) {
+      return `${bgColor} ${textColor}`
     }
     return "bg-gray-100 text-gray-800"
   }
@@ -180,242 +177,255 @@ export function EnhancedTaskDetailDialog({ taskId, open, onOpenChange }: TaskDet
     return colors[priority as keyof typeof colors] || "bg-gray-100 text-gray-800"
   }
 
-  const renderComment = (comment: Comment, isReply = false) => (
-    <div key={comment.id} className={`flex space-x-3 ${isReply ? "ml-8 mt-2" : ""}`}>
-      <Avatar className="h-8 w-8">
-        <AvatarFallback className="text-xs">{comment.user_name?.charAt(0) || "U"}</AvatarFallback>
-      </Avatar>
-      <div className="flex-1">
-        <div className="flex items-center space-x-2 mb-1">
-          <span className="font-medium text-sm">{comment.user_name}</span>
-          <span className="text-xs text-gray-500">
-            {formatDistanceToNow(new Date(comment.created_at), { addSuffix: true })}
-          </span>
-          {comment.parent_comment_id && (
-            <Badge variant="outline" className="text-xs">
-              Reply to {comment.parent_user_name}
-            </Badge>
-          )}
-        </div>
+  const renderComment = (comment: any, isReply = false) => {
+    const hasReplies = comments.filter((c) => c.parent_comment_id === comment.id).length > 0
 
-        {comment.parent_content && (
-          <div className="bg-gray-50 border-l-2 border-gray-200 pl-3 py-1 mb-2 text-xs text-gray-600">
-            <span className="font-medium">{comment.parent_user_name}:</span> {comment.parent_content.substring(0, 100)}
-            ...
+    return (
+      <div key={comment.id} className={`space-y-3 ${isReply ? "ml-8 border-l-2 border-gray-200 pl-4" : ""}`}>
+        <div className="flex items-start space-x-3">
+          <Avatar className="h-8 w-8">
+            <AvatarFallback className="text-xs">{comment.user_name?.charAt(0) || "U"}</AvatarFallback>
+          </Avatar>
+          <div className="flex-1">
+            <div className="flex items-center space-x-2 mb-1">
+              <span className="font-medium text-sm">{comment.user_name}</span>
+              <span className="text-xs text-gray-500">
+                {formatDistanceToNow(new Date(comment.created_at), { addSuffix: true })}
+              </span>
+              {comment.parent_comment_id && (
+                <Badge variant="outline" className="text-xs">
+                  <Reply className="h-3 w-3 mr-1" />
+                  Reply to {comment.parent_user_name}
+                </Badge>
+              )}
+            </div>
+            <div className="text-sm">
+              <MarkdownRenderer content={comment.content} />
+            </div>
+            <div className="flex items-center space-x-2 mt-2">
+              <Button variant="ghost" size="sm" onClick={() => setReplyingTo(comment.id)} className="text-xs">
+                <Reply className="h-3 w-3 mr-1" />
+                Reply
+              </Button>
+              {hasReplies && <span className="text-xs text-gray-500">{comment.reply_count} replies</span>}
+            </div>
           </div>
-        )}
-
-        <div className="text-sm text-gray-700 whitespace-pre-wrap">
-          {comment.content.split(/(@\w+)/g).map((part, index) => {
-            if (part.startsWith("@")) {
-              const username = part.substring(1)
-              const user = users.find((u) => u.name === username)
-              return user ? (
-                <span key={index} className="bg-blue-100 text-blue-800 px-1 rounded">
-                  {part}
-                </span>
-              ) : (
-                part
-              )
-            }
-            return part
-          })}
         </div>
 
-        <Button variant="ghost" size="sm" className="mt-1 h-6 px-2 text-xs" onClick={() => setReplyingTo(comment.id)}>
-          <Reply className="h-3 w-3 mr-1" />
-          Reply
-        </Button>
+        {/* Render replies */}
+        {comments.filter((c) => c.parent_comment_id === comment.id).map((reply) => renderComment(reply, true))}
       </div>
-    </div>
-  )
+    )
+  }
 
-  if (!open) return null
+  if (!task) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent>
+          <div className="flex items-center justify-center p-8">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
+              <p>Loading task details...</p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="text-center">Loading task details...</div>
+        <DialogHeader>
+          <div className="flex items-center justify-between">
+            <DialogTitle className="flex items-center space-x-2">
+              <span>{task.title}</span>
+              <Badge className={getStatusColor(task.status, task.status_bg_color, task.status_text_color)}>
+                {task.status.replace("_", " ")}
+              </Badge>
+              <Badge className={getPriorityColor(task.priority)}>{task.priority}</Badge>
+            </DialogTitle>
+            <div className="flex space-x-2">
+              <Select value={task.status} onValueChange={updateTaskStatus}>
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="backlog">Backlog</SelectItem>
+                  <SelectItem value="todo">To Do</SelectItem>
+                  <SelectItem value="in_progress">In Progress</SelectItem>
+                  <SelectItem value="in_review">In Review</SelectItem>
+                  <SelectItem value="testing">Testing</SelectItem>
+                  <SelectItem value="done">Done</SelectItem>
+                  <SelectItem value="blocked">Blocked</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" onClick={() => setFileUploadOpen(true)}>
+                <Upload className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
-        ) : taskDetail ? (
-          <>
-            <DialogHeader>
-              <DialogTitle className="text-xl">{taskDetail.task.title}</DialogTitle>
-              <div className="flex items-center space-x-2 mt-2">
-                <Badge className={getPriorityColor(taskDetail.task.priority)}>{taskDetail.task.priority}</Badge>
-                <Badge className={getStatusColor(taskDetail.task.status)}>
-                  {taskDetail.task.status.replace("_", " ")}
-                </Badge>
-                <span className="text-sm text-gray-500">
-                  {taskDetail.task.project_name} ({taskDetail.task.project_code})
-                </span>
-              </div>
-            </DialogHeader>
+        </DialogHeader>
 
+        <Tabs defaultValue="details" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="details">Details</TabsTrigger>
+            <TabsTrigger value="comments">Comments ({comments.filter((c) => !c.parent_comment_id).length})</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="details" className="space-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Main Content */}
-              <div className="lg:col-span-2 space-y-6">
-                {/* Description */}
-                <div>
-                  <h3 className="font-semibold mb-2">Description</h3>
-                  <p className="text-gray-700 whitespace-pre-wrap">
-                    {taskDetail.task.description || "No description provided"}
-                  </p>
-                </div>
-
-                {/* Comments Section */}
-                <div>
-                  <h3 className="font-semibold mb-4 flex items-center">
-                    <MessageCircle className="h-4 w-4 mr-2" />
-                    Comments ({taskDetail.comments.length})
-                  </h3>
-
-                  {/* Comment Form */}
-                  <form onSubmit={handleSubmitComment} className="mb-4 relative">
-                    {replyingTo && (
-                      <div className="bg-blue-50 border border-blue-200 rounded p-2 mb-2 text-sm">
-                        <span className="font-medium">Replying to comment</span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="ml-2 h-5 px-2"
-                          onClick={() => setReplyingTo(null)}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
+              <div className="lg:col-span-2 space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Description</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {task.description ? (
+                      <MarkdownRenderer content={task.description} />
+                    ) : (
+                      <p className="text-gray-500">No description provided</p>
                     )}
-
-                    <div className="flex space-x-2">
-                      <div className="flex-1 relative">
-                        <Textarea
-                          value={newComment}
-                          onChange={(e) => handleCommentChange(e.target.value)}
-                          placeholder="Add a comment... Use @username to mention someone"
-                          className="flex-1"
-                          rows={2}
-                        />
-
-                        {showUserSuggestions && (
-                          <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-md shadow-lg z-10 max-h-32 overflow-y-auto">
-                            {userSuggestions.map((user) => (
-                              <button
-                                key={user.id}
-                                type="button"
-                                className="w-full text-left px-3 py-2 hover:bg-gray-100 flex items-center space-x-2"
-                                onClick={() => insertMention(user)}
-                              >
-                                <Avatar className="h-6 w-6">
-                                  <AvatarFallback className="text-xs">{user.name.charAt(0)}</AvatarFallback>
-                                </Avatar>
-                                <div>
-                                  <div className="font-medium text-sm">{user.name}</div>
-                                  <div className="text-xs text-gray-500">{user.role}</div>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      <Button type="submit" disabled={submittingComment || !newComment.trim()} size="sm">
-                        <Send className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </form>
-
-                  {/* Comments List */}
-                  <div className="space-y-4 max-h-96 overflow-y-auto">
-                    {taskDetail.comments
-                      .filter((comment) => !comment.parent_comment_id)
-                      .map((comment) => (
-                        <div key={comment.id}>
-                          {renderComment(comment)}
-                          {/* Render replies */}
-                          {taskDetail.comments
-                            .filter((reply) => reply.parent_comment_id === comment.id)
-                            .map((reply) => renderComment(reply, true))}
-                        </div>
-                      ))}
-                    {taskDetail.comments.length === 0 && <p className="text-gray-500 text-sm">No comments yet</p>}
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               </div>
 
               {/* Sidebar */}
-              <div className="space-y-6">
-                {/* Task Info */}
-                <div>
-                  <h3 className="font-semibold mb-3">Task Information</h3>
-                  <div className="space-y-3">
-                    {taskDetail.task.assigned_user_name && (
-                      <div className="flex items-center space-x-2">
-                        <User className="h-4 w-4 text-gray-500" />
-                        <span className="text-sm">Assigned to: {taskDetail.task.assigned_user_name}</span>
+              <div className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Task Information</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <User className="h-4 w-4 text-gray-500" />
+                      <div>
+                        <p className="text-xs text-gray-500">Assigned to</p>
+                        <p className="text-sm font-medium">{task.assigned_user_name || "Unassigned"}</p>
                       </div>
-                    )}
-
-                    {taskDetail.task.due_date && (
-                      <div className="flex items-center space-x-2">
-                        <Calendar className="h-4 w-4 text-gray-500" />
-                        <span className="text-sm">Due: {new Date(taskDetail.task.due_date).toLocaleDateString()}</span>
-                      </div>
-                    )}
-
-                    {taskDetail.task.estimated_hours && (
-                      <div className="flex items-center space-x-2">
-                        <Clock className="h-4 w-4 text-gray-500" />
-                        <span className="text-sm">Estimated: {taskDetail.task.estimated_hours}h</span>
-                      </div>
-                    )}
-
-                    <div className="text-sm text-gray-500">Created by: {taskDetail.task.created_by_name}</div>
-
-                    <div className="text-sm text-gray-500">
-                      Created: {new Date(taskDetail.task.created_at).toLocaleDateString()}
                     </div>
-                  </div>
-                </div>
 
-                {/* Tags */}
-                {taskDetail.task.tags && taskDetail.task.tags.length > 0 && (
-                  <div>
-                    <h3 className="font-semibold mb-2">Tags</h3>
-                    <div className="flex flex-wrap gap-1">
-                      {JSON.parse(taskDetail.task.tags).map((tag: string, index: number) => (
-                        <Badge key={index} variant="outline" className="text-xs">
-                          {tag}
-                        </Badge>
-                      ))}
+                    <Separator />
+
+                    <div className="flex items-center space-x-2">
+                      <Calendar className="h-4 w-4 text-gray-500" />
+                      <div>
+                        <p className="text-xs text-gray-500">Due Date</p>
+                        <p className="text-sm font-medium">
+                          {task.due_date ? new Date(task.due_date).toLocaleDateString() : "No due date"}
+                        </p>
+                      </div>
                     </div>
-                  </div>
+
+                    <Separator />
+
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Created</p>
+                      <p className="text-sm">{formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}</p>
+                      <p className="text-xs text-gray-500">by {task.created_by_name}</p>
+                    </div>
+
+                    {task.updated_at !== task.created_at && (
+                      <>
+                        <Separator />
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Last Updated</p>
+                          <p className="text-sm">
+                            {formatDistanceToNow(new Date(task.updated_at), { addSuffix: true })}
+                          </p>
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="comments" className="space-y-4">
+            {/* Comments List */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <MessageSquare className="h-5 w-5" />
+                  <span>Comments</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {comments.filter((c) => !c.parent_comment_id).length > 0 ? (
+                  comments.filter((c) => !c.parent_comment_id).map((comment) => renderComment(comment))
+                ) : (
+                  <p className="text-gray-500 text-center py-8">No comments yet</p>
                 )}
+              </CardContent>
+            </Card>
 
-                {/* Time Tracking */}
-                {taskDetail.timeEntries.length > 0 && (
-                  <div>
-                    <h3 className="font-semibold mb-2">Time Entries</h3>
-                    <div className="space-y-2 max-h-32 overflow-y-auto">
-                      {taskDetail.timeEntries.map((entry) => (
-                        <div key={entry.id} className="text-sm border-l-2 border-blue-200 pl-2">
-                          <div className="font-medium">{entry.hours}h</div>
-                          <div className="text-gray-600">{entry.user_name}</div>
-                          <div className="text-gray-500 text-xs">{new Date(entry.date).toLocaleDateString()}</div>
-                          {entry.description && <div className="text-gray-600 text-xs mt-1">{entry.description}</div>}
+            {/* Add Comment */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">{replyingTo ? "Reply to Comment" : "Add Comment"}</CardTitle>
+                {replyingTo && (
+                  <Button variant="outline" size="sm" onClick={() => setReplyingTo(null)} className="w-fit">
+                    Cancel Reply
+                  </Button>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="relative">
+                  <Textarea
+                    value={newComment}
+                    onChange={(e) => handleCommentChange(e.target.value)}
+                    placeholder="Write a comment... Use @username to mention someone"
+                    rows={4}
+                  />
+
+                  {/* Mention Suggestions */}
+                  {showMentions && mentionSuggestions.length > 0 && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border rounded-md shadow-lg">
+                      {mentionSuggestions.map((user) => (
+                        <div
+                          key={user.id}
+                          className="flex items-center space-x-2 p-2 hover:bg-gray-100 cursor-pointer"
+                          onClick={() => insertMention(user)}
+                        >
+                          <Avatar className="h-6 w-6">
+                            <AvatarFallback className="text-xs">{user.name?.charAt(0) || "U"}</AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="text-sm font-medium">{user.name}</p>
+                            <p className="text-xs text-gray-500">{user.email}</p>
+                          </div>
                         </div>
                       ))}
                     </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 text-xs text-gray-500">
+                    <AtSign className="h-3 w-3" />
+                    <span>Use @username to mention team members</span>
                   </div>
-                )}
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="text-center py-8">Task not found</div>
-        )}
+                  <Button onClick={submitComment} disabled={loading || !newComment.trim()}>
+                    <Send className="h-4 w-4 mr-2" />
+                    {loading ? "Sending..." : replyingTo ? "Reply" : "Comment"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+
+        <FileUploadDialog
+          open={fileUploadOpen}
+          onOpenChange={setFileUploadOpen}
+          taskId={taskId}
+          onUploadComplete={() => {
+            loadTaskDetails()
+            router.refresh()
+          }}
+        />
       </DialogContent>
     </Dialog>
   )

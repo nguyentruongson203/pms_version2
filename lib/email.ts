@@ -1,34 +1,33 @@
 import nodemailer from "nodemailer"
 import db from "./db"
 
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "localhost",
   port: Number.parseInt(process.env.SMTP_PORT || "587"),
   secure: process.env.SMTP_SECURE === "true",
   auth: {
     user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
+    pass: process.env.SMTP_PASS, // Google App Password
   },
 })
 
 interface EmailData {
   to: string
-  name: string
+  toName?: string
   subject: string
   template: string
-  data: any
+  data: Record<string, any>
 }
 
-export async function sendNotificationEmail({ to, name, subject, template, data }: EmailData) {
+export async function sendNotificationEmail({ to, toName, subject, template, data }: EmailData) {
   try {
-    const htmlContent = generateEmailTemplate(template, { ...data, recipient_name: name })
-    const textContent = generateTextContent(template, { ...data, recipient_name: name })
+    const { html, text } = generateEmailContent(template, data)
 
     // Queue email in database
     await db.execute(
       `INSERT INTO email_queue (to_email, to_name, subject, html_content, text_content, template_name, template_data)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [to, name, subject, htmlContent, textContent, template, JSON.stringify(data)],
+      [to, toName, subject, html, text, template, JSON.stringify(data)],
     )
 
     // Try to send immediately (in production, use a queue worker)
@@ -36,7 +35,7 @@ export async function sendNotificationEmail({ to, name, subject, template, data 
       await processEmailQueue()
     }
   } catch (error) {
-    console.error("Email queue error:", error)
+    console.error("Email notification error:", error)
   }
 }
 
@@ -45,8 +44,7 @@ export async function processEmailQueue() {
     const [emails] = await db.execute(
       `SELECT * FROM email_queue 
        WHERE status = 'pending' AND attempts < max_attempts 
-       AND scheduled_at <= NOW() 
-       ORDER BY created_at ASC 
+       ORDER BY scheduled_at ASC 
        LIMIT 10`,
     )
 
@@ -54,7 +52,7 @@ export async function processEmailQueue() {
       try {
         await transporter.sendMail({
           from: `"${process.env.FROM_NAME || "PMS System"}" <${process.env.FROM_EMAIL || "noreply@pms.com"}>`,
-          to: `"${email.to_name}" <${email.to_email}>`,
+          to: email.to_name ? `"${email.to_name}" <${email.to_email}>` : email.to_email,
           subject: email.subject,
           html: email.html_content,
           text: email.text_content,
@@ -63,18 +61,17 @@ export async function processEmailQueue() {
         // Mark as sent
         await db.execute(`UPDATE email_queue SET status = 'sent', sent_at = NOW() WHERE id = ?`, [email.id])
 
-        console.log(`Email sent to ${email.to_email}`)
+        console.log(`Email sent successfully to ${email.to_email}`)
       } catch (error) {
+        console.error(`Failed to send email to ${email.to_email}:`, error)
+
         // Mark as failed and increment attempts
         await db.execute(
           `UPDATE email_queue 
-           SET attempts = attempts + 1, error_message = ?, 
-               status = CASE WHEN attempts + 1 >= max_attempts THEN 'failed' ELSE 'pending' END
+           SET attempts = attempts + 1, error_message = ?, status = CASE WHEN attempts + 1 >= max_attempts THEN 'failed' ELSE 'pending' END
            WHERE id = ?`,
-          [error.message, email.id],
+          [error instanceof Error ? error.message : "Unknown error", email.id],
         )
-
-        console.error(`Email failed for ${email.to_email}:`, error)
       }
     }
   } catch (error) {
@@ -82,156 +79,125 @@ export async function processEmailQueue() {
   }
 }
 
-function generateEmailTemplate(template: string, data: any): string {
-  const baseStyle = `
-    <style>
-      body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-      .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-      .header { background: #3B82F6; color: white; padding: 20px; text-align: center; }
-      .content { padding: 20px; background: #f9f9f9; }
-      .button { display: inline-block; padding: 12px 24px; background: #3B82F6; color: white; text-decoration: none; border-radius: 5px; }
-      .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
-    </style>
-  `
-
-  switch (template) {
-    case "project_assignment":
-      return `
-        <!DOCTYPE html>
-        <html>
-        <head>${baseStyle}</head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <h1>Project Assignment</h1>
-            </div>
-            <div class="content">
-              <p>Hello ${data.recipient_name},</p>
-              <p>You have been assigned as project manager for <strong>${data.project_name}</strong> (${data.project_code}).</p>
-              <p>Assigned by: ${data.assigned_by}</p>
-              <p><a href="${data.project_url}" class="button">View Project</a></p>
-            </div>
-            <div class="footer">
-              <p>This is an automated message from PMS System</p>
-            </div>
+function generateEmailContent(template: string, data: Record<string, any>) {
+  const templates = {
+    mention: {
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">You were mentioned in a comment</h2>
+          <p>Hi there,</p>
+          <p><strong>${data.mentionedBy}</strong> mentioned you in a comment:</p>
+          <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0;">
+            <p style="margin: 0;">${data.content}</p>
           </div>
-        </body>
-        </html>
-      `
+          ${data.taskTitle ? `<p><strong>Task:</strong> ${data.taskTitle}</p>` : ""}
+          ${data.projectName ? `<p><strong>Project:</strong> ${data.projectName}</p>` : ""}
+          <p>
+            <a href="${data.actionUrl}" style="background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+              View Comment
+            </a>
+          </p>
+          <hr style="margin: 30px 0;">
+          <p style="color: #666; font-size: 12px;">
+            This is an automated notification from PMS System. Please do not reply to this email.
+          </p>
+        </div>
+      `,
+      text: `You were mentioned in a comment by ${data.mentionedBy}:\n\n${data.content}\n\n${data.taskTitle ? `Task: ${data.taskTitle}\n` : ""}${data.projectName ? `Project: ${data.projectName}\n` : ""}\nView: ${data.actionUrl}`,
+    },
 
-    case "task_assignment":
-      return `
-        <!DOCTYPE html>
-        <html>
-        <head>${baseStyle}</head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <h1>New Task Assignment</h1>
-            </div>
-            <div class="content">
-              <p>Hello ${data.recipient_name},</p>
-              <p>A new task has been assigned to you:</p>
-              <h3>${data.task_title}</h3>
-              <p><strong>Project:</strong> ${data.project_name}</p>
-              <p><strong>Priority:</strong> ${data.priority}</p>
-              <p><strong>Due Date:</strong> ${data.due_date || "Not set"}</p>
-              <p><a href="${data.task_url}" class="button">View Task</a></p>
-            </div>
-            <div class="footer">
-              <p>This is an automated message from PMS System</p>
-            </div>
+    task_comment: {
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">New comment on your task</h2>
+          <p>Hi there,</p>
+          <p><strong>${data.commenterName}</strong> commented on your task:</p>
+          <div style="background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 15px 0;">
+            <h3 style="margin: 0 0 10px 0; color: #1976d2;">${data.taskTitle}</h3>
+            <p style="margin: 0; color: #666;">Project: ${data.projectName}</p>
           </div>
-        </body>
-        </html>
-      `
+          <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0;">
+            <p style="margin: 0;">${data.content}</p>
+          </div>
+          <p>
+            <a href="${data.actionUrl}" style="background: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+              View Task
+            </a>
+          </p>
+          <hr style="margin: 30px 0;">
+          <p style="color: #666; font-size: 12px;">
+            This is an automated notification from PMS System. Please do not reply to this email.
+          </p>
+        </div>
+      `,
+      text: `New comment on your task "${data.taskTitle}" by ${data.commenterName}:\n\n${data.content}\n\nProject: ${data.projectName}\nView: ${data.actionUrl}`,
+    },
 
-    case "mention_notification":
-      return `
-        <!DOCTYPE html>
-        <html>
-        <head>${baseStyle}</head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <h1>You were mentioned</h1>
-            </div>
-            <div class="content">
-              <p>Hello ${data.recipient_name},</p>
-              <p><strong>${data.mentioned_by}</strong> mentioned you in a comment:</p>
-              <blockquote style="border-left: 4px solid #3B82F6; padding-left: 16px; margin: 16px 0; font-style: italic;">
-                ${data.comment_content}
-              </blockquote>
-              <p><a href="${data.comment_url}" class="button">View Comment</a></p>
-            </div>
-            <div class="footer">
-              <p>This is an automated message from PMS System</p>
-            </div>
+    task_assigned: {
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">Task Assigned to You</h2>
+          <p>Hi ${data.assigneeName},</p>
+          <p>You have been assigned a new task:</p>
+          <div style="background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 15px 0;">
+            <h3 style="margin: 0 0 10px 0; color: #2e7d32;">${data.taskTitle}</h3>
+            <p style="margin: 0; color: #666;">Project: ${data.projectName}</p>
+            <p style="margin: 5px 0 0 0; color: #666;">Priority: ${data.priority}</p>
+            ${data.dueDate ? `<p style="margin: 5px 0 0 0; color: #666;">Due: ${data.dueDate}</p>` : ""}
           </div>
-        </body>
-        </html>
-      `
+          ${data.description ? `<div style="background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0;"><p style="margin: 0;">${data.description}</p></div>` : ""}
+          <p>
+            <a href="${data.actionUrl}" style="background: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+              View Task
+            </a>
+          </p>
+          <hr style="margin: 30px 0;">
+          <p style="color: #666; font-size: 12px;">
+            This is an automated notification from PMS System. Please do not reply to this email.
+          </p>
+        </div>
+      `,
+      text: `Task assigned to you: "${data.taskTitle}"\n\nProject: ${data.projectName}\nPriority: ${data.priority}\n${data.dueDate ? `Due: ${data.dueDate}\n` : ""}\n${data.description ? `Description: ${data.description}\n` : ""}\nView: ${data.actionUrl}`,
+    },
 
-    case "task_comment":
-      return `
-        <!DOCTYPE html>
-        <html>
-        <head>${baseStyle}</head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <h1>New Comment</h1>
-            </div>
-            <div class="content">
-              <p>Hello ${data.recipient_name},</p>
-              <p><strong>${data.commenter_name}</strong> commented on your task:</p>
-              <h3>${data.task_title}</h3>
-              <blockquote style="border-left: 4px solid #3B82F6; padding-left: 16px; margin: 16px 0; font-style: italic;">
-                ${data.comment_content}
-              </blockquote>
-              <p><a href="${data.task_url}" class="button">View Task</a></p>
-            </div>
-            <div class="footer">
-              <p>This is an automated message from PMS System</p>
-            </div>
+    project_assigned: {
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">Added to Project Team</h2>
+          <p>Hi ${data.memberName},</p>
+          <p>You have been added to a project team:</p>
+          <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0;">
+            <h3 style="margin: 0 0 10px 0; color: #856404;">${data.projectName}</h3>
+            <p style="margin: 0; color: #666;">Role: ${data.role}</p>
+            <p style="margin: 5px 0 0 0; color: #666;">Project Manager: ${data.projectManager}</p>
           </div>
-        </body>
-        </html>
-      `
-
-    default:
-      return `
-        <!DOCTYPE html>
-        <html>
-        <head>${baseStyle}</head>
-        <body>
-          <div class="container">
-            <div class="content">
-              <p>Hello ${data.recipient_name},</p>
-              <p>You have a new notification from PMS System.</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `
+          ${data.description ? `<div style="background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0;"><p style="margin: 0;">${data.description}</p></div>` : ""}
+          <p>
+            <a href="${data.actionUrl}" style="background: #ffc107; color: #212529; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+              View Project
+            </a>
+          </p>
+          <hr style="margin: 30px 0;">
+          <p style="color: #666; font-size: 12px;">
+            This is an automated notification from PMS System. Please do not reply to this email.
+          </p>
+        </div>
+      `,
+      text: `You have been added to project "${data.projectName}"\n\nRole: ${data.role}\nProject Manager: ${data.projectManager}\n${data.description ? `Description: ${data.description}\n` : ""}\nView: ${data.actionUrl}`,
+    },
   }
+
+  const template_content = templates[template as keyof typeof templates]
+  if (!template_content) {
+    throw new Error(`Email template "${template}" not found`)
+  }
+
+  return template_content
 }
 
-function generateTextContent(template: string, data: any): string {
-  switch (template) {
-    case "project_assignment":
-      return `Hello ${data.recipient_name},\n\nYou have been assigned as project manager for ${data.project_name} (${data.project_code}).\n\nAssigned by: ${data.assigned_by}\n\nView project: ${data.project_url}`
-
-    case "task_assignment":
-      return `Hello ${data.recipient_name},\n\nA new task has been assigned to you:\n\n${data.task_title}\n\nProject: ${data.project_name}\nPriority: ${data.priority}\nDue Date: ${data.due_date || "Not set"}\n\nView task: ${data.task_url}`
-
-    case "mention_notification":
-      return `Hello ${data.recipient_name},\n\n${data.mentioned_by} mentioned you in a comment:\n\n"${data.comment_content}"\n\nView comment: ${data.comment_url}`
-
-    case "task_comment":
-      return `Hello ${data.recipient_name},\n\n${data.commenter_name} commented on your task: ${data.task_title}\n\n"${data.comment_content}"\n\nView task: ${data.task_url}`
-
-    default:
-      return `Hello ${data.recipient_name},\n\nYou have a new notification from PMS System.`
-  }
+// Cron job function to process email queue (call this periodically)
+export async function startEmailProcessor() {
+  setInterval(async () => {
+    await processEmailQueue()
+  }, 30000) // Process every 30 seconds
 }
