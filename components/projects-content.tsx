@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Progress } from "@/components/ui/progress"
 import { Search, Users, Calendar, DollarSign } from "lucide-react"
-import { CreateProjectDialog } from "./create-project-dialog"
+import { EnhancedCreateProjectDialog } from "./enhanced-create-project-dialog"
 import Link from "next/link"
 
 interface ProjectsContentProps {
@@ -20,17 +20,34 @@ export function ProjectsContent({ projects, user }: ProjectsContentProps) {
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [typeFilter, setTypeFilter] = useState("all")
+  const [statusColors, setStatusColors] = useState<Record<string, any>>({})
+
+  useEffect(() => {
+    fetchStatusColors()
+  }, [])
+
+  const fetchStatusColors = async () => {
+    try {
+      const response = await fetch("/api/status-colors?type=project")
+      if (response.ok) {
+        const colors = await response.json()
+        const colorMap = colors.reduce((acc: any, color: any) => {
+          acc[color.status_value] = color
+          return acc
+        }, {})
+        setStatusColors(colorMap)
+      }
+    } catch (error) {
+      console.error("Error fetching status colors:", error)
+    }
+  }
 
   const getStatusColor = (status: string) => {
-    const colors = {
-      planning: "bg-blue-100 text-blue-800",
-      in_progress: "bg-yellow-100 text-yellow-800",
-      completed: "bg-green-100 text-green-800",
-      on_hold: "bg-gray-100 text-gray-800",
-      cancelled: "bg-red-100 text-red-800",
-      under_review: "bg-purple-100 text-purple-800",
+    const statusColor = statusColors[status]
+    if (statusColor) {
+      return `${statusColor.bg_color} ${statusColor.text_color}`
     }
-    return colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"
+    return "bg-gray-100 text-gray-800"
   }
 
   const getPriorityColor = (priority: string) => {
@@ -42,10 +59,21 @@ export function ProjectsContent({ projects, user }: ProjectsContentProps) {
     return colors[priority as keyof typeof colors] || "bg-gray-100 text-gray-800"
   }
 
+  const getRiskLevelColor = (riskLevel: string) => {
+    const colors = {
+      low: "bg-green-100 text-green-800",
+      medium: "bg-yellow-100 text-yellow-800",
+      high: "bg-orange-100 text-orange-800",
+      critical: "bg-red-100 text-red-800",
+    }
+    return colors[riskLevel as keyof typeof colors] || "bg-gray-100 text-gray-800"
+  }
+
   const filteredProjects = projects.filter((project) => {
     const matchesSearch =
       project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      project.project_code.toLowerCase().includes(searchTerm.toLowerCase())
+      project.project_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (project.client_name && project.client_name.toLowerCase().includes(searchTerm.toLowerCase()))
     const matchesStatus = statusFilter === "all" || project.status === statusFilter
     const matchesType = typeFilter === "all" || project.type === typeFilter
 
@@ -64,7 +92,7 @@ export function ProjectsContent({ projects, user }: ProjectsContentProps) {
               </Link>
               <h1 className="text-2xl font-bold text-gray-900">Projects</h1>
             </div>
-            <CreateProjectDialog />
+            <EnhancedCreateProjectDialog />
           </div>
         </div>
       </header>
@@ -118,8 +146,16 @@ export function ProjectsContent({ projects, user }: ProjectsContentProps) {
                   <div>
                     <CardTitle className="text-lg">{project.name}</CardTitle>
                     <CardDescription>{project.project_code}</CardDescription>
+                    {project.client_name && <p className="text-xs text-gray-500 mt-1">Client: {project.client_name}</p>}
                   </div>
-                  <Badge className={getPriorityColor(project.priority)}>{project.priority}</Badge>
+                  <div className="flex flex-col space-y-1">
+                    <Badge className={getPriorityColor(project.priority)}>{project.priority}</Badge>
+                    {project.risk_level && (
+                      <Badge className={getRiskLevelColor(project.risk_level)} variant="outline">
+                        {project.risk_level} risk
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
@@ -133,6 +169,12 @@ export function ProjectsContent({ projects, user }: ProjectsContentProps) {
                     <Badge variant="outline">{project.type}</Badge>
                   </div>
 
+                  {project.methodology && (
+                    <div className="flex justify-between items-center text-sm text-gray-600">
+                      <span>Methodology: {project.methodology}</span>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between text-sm text-gray-600">
                     <div className="flex items-center">
                       <Users className="h-4 w-4 mr-1" />
@@ -144,22 +186,37 @@ export function ProjectsContent({ projects, user }: ProjectsContentProps) {
                     </div>
                   </div>
 
-                  {project.budget && (
-                    <div className="flex items-center text-sm text-gray-600">
-                      <DollarSign className="h-4 w-4 mr-1" />${project.budget.toLocaleString()}
+                  {(project.budget || project.estimated_budget) && (
+                    <div className="flex items-center justify-between text-sm text-gray-600">
+                      {project.estimated_budget && (
+                        <div className="flex items-center">
+                          <DollarSign className="h-4 w-4 mr-1" />
+                          Est: ${project.estimated_budget.toLocaleString()}
+                        </div>
+                      )}
+                      {project.budget && (
+                        <div className="flex items-center">
+                          <DollarSign className="h-4 w-4 mr-1" />
+                          Budget: ${project.budget.toLocaleString()}
+                        </div>
+                      )}
                     </div>
                   )}
 
                   <div>
                     <div className="flex justify-between text-sm mb-1">
                       <span>Progress</span>
-                      <span>65%</span>
+                      <span>{project.completion_percentage || 0}%</span>
                     </div>
-                    <Progress value={65} className="h-2" />
+                    <Progress value={project.completion_percentage || 0} className="h-2" />
                   </div>
 
                   {project.end_date && (
                     <div className="text-sm text-gray-600">Due: {new Date(project.end_date).toLocaleDateString()}</div>
+                  )}
+
+                  {project.project_manager_name && (
+                    <div className="text-sm text-gray-600">PM: {project.project_manager_name}</div>
                   )}
                 </div>
 

@@ -1,13 +1,13 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Calendar, Clock } from "lucide-react"
 import { CreateTaskDialog } from "./create-task-dialog"
-import { TaskDetailDialog } from "./task-detail-dialog"
+import { EnhancedTaskDetailDialog } from "./enhanced-task-detail-dialog"
 import Link from "next/link"
 
 interface KanbanBoardProps {
@@ -29,6 +29,27 @@ export function KanbanBoard({ tasks, project, user }: KanbanBoardProps) {
   const [taskList, setTaskList] = useState(tasks)
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
   const [taskDetailOpen, setTaskDetailOpen] = useState(false)
+  const [statusColors, setStatusColors] = useState<Record<string, any>>({})
+
+  useEffect(() => {
+    fetchStatusColors()
+  }, [])
+
+  const fetchStatusColors = async () => {
+    try {
+      const response = await fetch("/api/status-colors?type=task")
+      if (response.ok) {
+        const colors = await response.json()
+        const colorMap = colors.reduce((acc: any, color: any) => {
+          acc[color.status_value] = color
+          return acc
+        }, {})
+        setStatusColors(colorMap)
+      }
+    } catch (error) {
+      console.error("Error fetching status colors:", error)
+    }
+  }
 
   const getPriorityColor = (priority: string) => {
     const colors = {
@@ -37,6 +58,14 @@ export function KanbanBoard({ tasks, project, user }: KanbanBoardProps) {
       low: "bg-green-100 text-green-800",
     }
     return colors[priority as keyof typeof colors] || "bg-gray-100 text-gray-800"
+  }
+
+  const getColumnColor = (status: string) => {
+    const statusColor = statusColors[status]
+    if (statusColor) {
+      return statusColor.bg_color.replace("text-", "bg-").replace("800", "100")
+    }
+    return COLUMNS.find((col) => col.id === status)?.color || "bg-gray-100"
   }
 
   const getTasksByStatus = (status: string) => {
@@ -90,6 +119,7 @@ export function KanbanBoard({ tasks, project, user }: KanbanBoardProps) {
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">{project.name}</h1>
                 <p className="text-sm text-gray-600">{project.project_code} - Kanban Board</p>
+                {project.client_name && <p className="text-xs text-gray-500">Client: {project.client_name}</p>}
               </div>
             </div>
             <CreateTaskDialog projectId={project.id} />
@@ -106,7 +136,7 @@ export function KanbanBoard({ tasks, project, user }: KanbanBoardProps) {
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, column.id)}
             >
-              <div className={`${column.color} rounded-lg p-4 mb-4`}>
+              <div className={`${getColumnColor(column.id)} rounded-lg p-4 mb-4`}>
                 <div className="flex justify-between items-center">
                   <h3 className="font-semibold text-gray-800">{column.title}</h3>
                   <Badge variant="secondary">{getTasksByStatus(column.id).length}</Badge>
@@ -178,7 +208,7 @@ export function KanbanBoard({ tasks, project, user }: KanbanBoardProps) {
         </div>
       </div>
 
-      <TaskDetailDialog taskId={selectedTaskId} open={taskDetailOpen} onOpenChange={setTaskDetailOpen} />
+      <EnhancedTaskDetailDialog taskId={selectedTaskId} open={taskDetailOpen} onOpenChange={setTaskDetailOpen} />
     </div>
   )
 }
