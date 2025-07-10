@@ -1,121 +1,166 @@
+import { notFound } from "next/navigation"
 import { getServerSession } from "next-auth"
-import { redirect } from "next/navigation"
 import { authOptions } from "@/lib/auth"
-import db from "@/lib/db"
 import { ProjectDetailContent } from "@/components/project-detail-content"
+import { db } from "@/lib/db"
 
-async function getProjectDetail(projectId: string) {
+async function getProject(id: string) {
   try {
-    const [projectRows] = await db.execute(
+    const [rows] = await db.execute(
       `
-      SELECT p.*, 
-             pm_user.name as project_manager_name,
-             pm_user.email as project_manager_email,
-             creator.name as created_by_name,
-             sc.bg_color, sc.text_color
+      SELECT 
+        p.*,
+        u.name as created_by_name,
+        pm.name as project_manager_name,
+        pm.email as project_manager_email
       FROM projects p
-      LEFT JOIN users pm_user ON p.project_manager_id = pm_user.id
-      LEFT JOIN users creator ON p.created_by = creator.id
-      LEFT JOIN status_colors sc ON sc.status_type = 'project' AND sc.status_value = p.status
+      LEFT JOIN users u ON p.created_by = u.id
+      LEFT JOIN users pm ON p.project_manager_id = pm.id
       WHERE p.id = ?
     `,
-      [projectId],
+      [id],
     )
 
-    const [memberRows] = await db.execute(
-      `
-      SELECT pm.*, u.name, u.email, u.avatar_url
-      FROM project_members pm
-      JOIN users u ON pm.user_id = u.id
-      WHERE pm.project_id = ?
-      ORDER BY pm.role, u.name
-    `,
-      [projectId],
-    )
+    return rows[0] || null
+  } catch (error) {
+    console.error("Error fetching project:", error)
+    return null
+  }
+}
 
-    const [taskRows] = await db.execute(
+async function getProjectTasks(projectId: string) {
+  try {
+    const [rows] = await db.execute(
       `
-      SELECT t.*, 
-             assigned_user.name as assigned_user_name,
-             assigned_user.email as assigned_user_email,
-             creator.name as created_by_name,
-             sc.bg_color as status_bg_color, 
-             sc.text_color as status_text_color
+      SELECT 
+        t.*,
+        u.name as assigned_to_name,
+        u.email as assigned_to_email,
+        creator.name as created_by_name
       FROM tasks t
-      LEFT JOIN users assigned_user ON t.assigned_to = assigned_user.id
+      LEFT JOIN users u ON t.assigned_to = u.id
       LEFT JOIN users creator ON t.created_by = creator.id
-      LEFT JOIN status_colors sc ON sc.status_type = 'task' AND sc.status_value = t.status
       WHERE t.project_id = ?
       ORDER BY t.created_at DESC
     `,
       [projectId],
     )
 
-    const [activityRows] = await db.execute(
+    return rows
+  } catch (error) {
+    console.error("Error fetching project tasks:", error)
+    return []
+  }
+}
+
+async function getProjectTeam(projectId: string) {
+  try {
+    const [rows] = await db.execute(
       `
-      SELECT al.*, u.name as user_name, u.avatar_url
-      FROM activity_logs al
-      JOIN users u ON al.user_id = u.id
-      WHERE al.project_id = ?
-      ORDER BY al.created_at DESC
-      LIMIT 20
+      SELECT DISTINCT 
+        u.id,
+        u.name,
+        u.email,
+        u.role,
+        'member' as project_role
+      FROM users u
+      INNER JOIN tasks t ON u.id = t.assigned_to
+      WHERE t.project_id = ?
+      
+      UNION
+      
+      SELECT 
+        u.id,
+        u.name,
+        u.email,
+        u.role,
+        'manager' as project_role
+      FROM users u
+      INNER JOIN projects p ON u.id = p.project_manager_id
+      WHERE p.id = ?
     `,
-      [projectId],
+      [projectId, projectId],
     )
 
-    const [fileRows] = await db.execute(
+    return rows
+  } catch (error) {
+    console.error("Error fetching project team:", error)
+    return []
+  }
+}
+
+async function getProjectFiles(projectId: string) {
+  try {
+    const [rows] = await db.execute(
       `
-      SELECT f.*, u.name as uploaded_by_name
+      SELECT 
+        f.*,
+        u.name as uploaded_by_name
       FROM file_uploads f
-      JOIN users u ON f.uploaded_by = u.id
+      LEFT JOIN users u ON f.uploaded_by = u.id
       WHERE f.project_id = ?
       ORDER BY f.created_at DESC
     `,
       [projectId],
     )
 
-    return {
-      project: projectRows[0] || null,
-      members: memberRows,
-      tasks: taskRows,
-      activities: activityRows,
-      files: fileRows,
-    }
+    return rows
   } catch (error) {
-    console.error("Project detail fetch error:", error)
-    return { project: null, members: [], tasks: [], activities: [], files: [] }
+    console.error("Error fetching project files:", error)
+    return []
   }
 }
 
-export default async function ProjectDetailPage({ params }: { params: { id: string } }) {
+async function getProjectActivity(projectId: string) {
+  try {
+    const [rows] = await db.execute(
+      `
+      SELECT 
+        a.*,
+        u.name as user_name
+      FROM activity_logs a
+      LEFT JOIN users u ON a.user_id = u.id
+      WHERE a.project_id = ?
+      ORDER BY a.created_at DESC
+      LIMIT 50
+    `,
+      [projectId],
+    )
+
+    return rows
+  } catch (error) {
+    console.error("Error fetching project activity:", error)
+    return []
+  }
+}
+
+export default async function ProjectDetailPage({
+  params,
+}: {
+  params: { id: string }
+}) {
   const session = await getServerSession(authOptions)
 
   if (!session) {
-    redirect("/auth/signin")
+    return <div>Access denied</div>
   }
 
-  const { project, members, tasks, activities, files } = await getProjectDetail(params.id)
+  const project = await getProject(params.id)
 
   if (!project) {
-    redirect("/projects")
+    notFound()
   }
 
-  // Check if user has access to this project
-  const userMember = members.find((member: any) => member.user_id === session.user.id)
-  const isCreator = project.created_by === session.user.id
-
-  if (!userMember && !isCreator) {
-    redirect("/projects")
-  }
+  const [tasks, team, files, activity] = await Promise.all([
+    getProjectTasks(params.id),
+    getProjectTeam(params.id),
+    getProjectFiles(params.id),
+    getProjectActivity(params.id),
+  ])
 
   return (
-    <ProjectDetailContent
-      project={project}
-      members={members}
-      tasks={tasks}
-      activities={activities}
-      files={files}
-      currentUser={session.user}
-    />
+    <div className="container mx-auto py-6">
+      <ProjectDetailContent project={project} tasks={tasks} team={team} files={files} activity={activity} />
+    </div>
   )
 }

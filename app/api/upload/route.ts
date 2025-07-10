@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import db from "@/lib/db"
+import { db } from "@/lib/db"
 import { writeFile, mkdir } from "fs/promises"
 import { join } from "path"
 import { existsSync } from "fs"
@@ -9,7 +9,7 @@ import { existsSync } from "fs"
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
-    if (!session) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
@@ -17,37 +17,17 @@ export async function POST(request: NextRequest) {
     const file = formData.get("file") as File
     const projectId = formData.get("projectId") as string
     const taskId = formData.get("taskId") as string
-    const commentId = formData.get("commentId") as string
 
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 })
     }
 
-    // Validate file type
-    const allowedTypes = [
-      "image/jpeg",
-      "image/png",
-      "image/gif",
-      "application/pdf",
-      "application/msword",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "application/vnd.ms-excel",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "text/plain",
-      "application/zip",
-    ]
-
-    if (!allowedTypes.includes(file.type)) {
-      return NextResponse.json({ error: "File type not allowed" }, { status: 400 })
-    }
-
-    // Validate file size (10MB)
-    const maxSize = 10 * 1024 * 1024
-    if (file.size > maxSize) {
+    // Validate file size (10MB limit)
+    if (file.size > 10 * 1024 * 1024) {
       return NextResponse.json({ error: "File too large" }, { status: 400 })
     }
 
-    // Create upload directory
+    // Create upload directory if it doesn't exist
     const uploadDir = join(process.cwd(), "uploads")
     if (!existsSync(uploadDir)) {
       await mkdir(uploadDir, { recursive: true })
@@ -55,9 +35,7 @@ export async function POST(request: NextRequest) {
 
     // Generate unique filename
     const timestamp = Date.now()
-    const randomString = Math.random().toString(36).substring(7)
-    const extension = file.name.split(".").pop()
-    const filename = `${timestamp}-${randomString}.${extension}`
+    const filename = `${timestamp}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`
     const filepath = join(uploadDir, filename)
 
     // Save file
@@ -67,46 +45,37 @@ export async function POST(request: NextRequest) {
 
     // Save to database
     const [result] = await db.execute(
-      `INSERT INTO file_uploads (filename, original_name, file_path, file_size, mime_type, uploaded_by, project_id, task_id, comment_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `
+      INSERT INTO file_uploads (
+        filename, original_name, file_path, file_size, mime_type,
+        project_id, task_id, uploaded_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+      [filename, file.name, filepath, file.size, file.type, projectId || null, taskId || null, session.user.id],
+    )
+
+    // Log activity
+    await db.execute(
+      `
+      INSERT INTO activity_logs (user_id, project_id, task_id, action, metadata)
+      VALUES (?, ?, ?, ?, ?)
+    `,
       [
-        filename,
-        file.name,
-        filepath,
-        file.size,
-        file.type,
         session.user.id,
-        projectId ? Number.parseInt(projectId) : null,
-        taskId ? Number.parseInt(taskId) : null,
-        commentId ? Number.parseInt(commentId) : null,
+        projectId || null,
+        taskId || null,
+        `uploaded file "${file.name}"`,
+        JSON.stringify({ filename, fileSize: file.size, mimeType: file.type }),
       ],
     )
 
-    const fileId = (result as any).insertId
-
-    // Log activity
-    if (projectId) {
-      await db.execute(
-        `INSERT INTO activity_logs (user_id, project_id, task_id, action, details)
-         VALUES (?, ?, ?, 'file_uploaded', ?)`,
-        [
-          session.user.id,
-          Number.parseInt(projectId),
-          taskId ? Number.parseInt(taskId) : null,
-          JSON.stringify({ filename: file.name, file_size: file.size }),
-        ],
-      )
-    }
-
     return NextResponse.json({
-      id: fileId,
-      filename,
-      original_name: file.name,
-      file_size: file.size,
-      message: "File uploaded successfully",
+      success: true,
+      fileId: (result as any).insertId,
+      filename: filename,
     })
   } catch (error) {
-    console.error("File upload error:", error)
+    console.error("Upload error:", error)
     return NextResponse.json({ error: "Upload failed" }, { status: 500 })
   }
 }

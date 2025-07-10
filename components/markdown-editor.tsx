@@ -2,200 +2,101 @@
 
 import { useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
-import { Eye, Edit, HelpCircle } from "lucide-react"
-import { MarkdownRenderer } from "./markdown-renderer"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
+import { MarkdownRenderer } from "@/components/markdown-renderer"
+import { Bold, Italic, List, ListOrdered, Quote, Code, Link, ImageIcon, Table } from "lucide-react"
 
 interface MarkdownEditorProps {
   value: string
   onChange: (value: string) => void
   placeholder?: string
-  rows?: number
+  className?: string
 }
 
-export function MarkdownEditor({ value, onChange, placeholder = "Enter markdown...", rows = 6 }: MarkdownEditorProps) {
-  const [activeTab, setActiveTab] = useState("edit")
+export function MarkdownEditor({
+  value,
+  onChange,
+  placeholder = "Enter your content...",
+  className = "",
+}: MarkdownEditorProps) {
+  const [activeTab, setActiveTab] = useState("write")
 
-  const insertMarkdown = (syntax: string, placeholder = "text") => {
-    const textarea = document.querySelector("textarea[data-markdown-editor]") as HTMLTextAreaElement
+  const insertMarkdown = (before: string, after = "") => {
+    const textarea = document.querySelector("textarea") as HTMLTextAreaElement
     if (!textarea) return
 
     const start = textarea.selectionStart
     const end = textarea.selectionEnd
     const selectedText = value.substring(start, end)
-    const replacement = syntax.replace(placeholder, selectedText || placeholder)
 
-    const newValue = value.substring(0, start) + replacement + value.substring(end)
-    onChange(newValue)
+    const newText = value.substring(0, start) + before + selectedText + after + value.substring(end)
+
+    onChange(newText)
 
     // Set cursor position
     setTimeout(() => {
-      const newCursorPos = start + replacement.length
-      textarea.setSelectionRange(newCursorPos, newCursorPos)
       textarea.focus()
+      const newCursorPos = start + before.length + selectedText.length + after.length
+      textarea.setSelectionRange(newCursorPos, newCursorPos)
     }, 0)
   }
 
-  const markdownHelp = `
-# Markdown Guide
-
-## Headers
-# H1 Header
-## H2 Header  
-### H3 Header
-
-## Text Formatting
-**Bold text**
-*Italic text*
-~~Strikethrough~~
-\`Inline code\`
-
-## Lists
-- Bullet point 1
-- Bullet point 2
-
-1. Numbered item 1
-2. Numbered item 2
-
-## Links & Images
-[Link text](https://example.com)
-![Image alt text](image-url)
-
-## Code Blocks
-\`\`\`javascript
-function hello() {
-  console.log("Hello World!");
-}
-\`\`\`
-
-## Tables
-| Column 1 | Column 2 |
-|----------|----------|
-| Cell 1   | Cell 2   |
-
-## Quotes
-> This is a blockquote
-
-## Task Lists
-- [x] Completed task
-- [ ] Incomplete task
-  `
+  const toolbarButtons = [
+    { icon: Bold, label: "Bold", action: () => insertMarkdown("**", "**") },
+    { icon: Italic, label: "Italic", action: () => insertMarkdown("*", "*") },
+    { icon: Code, label: "Code", action: () => insertMarkdown("`", "`") },
+    { icon: Quote, label: "Quote", action: () => insertMarkdown("> ") },
+    { icon: List, label: "Bullet List", action: () => insertMarkdown("- ") },
+    { icon: ListOrdered, label: "Numbered List", action: () => insertMarkdown("1. ") },
+    { icon: Link, label: "Link", action: () => insertMarkdown("[", "](url)") },
+    { icon: ImageIcon, label: "Image", action: () => insertMarkdown("![alt](", ")") },
+    {
+      icon: Table,
+      label: "Table",
+      action: () => insertMarkdown("\n| Header 1 | Header 2 |\n|----------|----------|\n| Cell 1   | Cell 2   |\n"),
+    },
+  ]
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="edit" className="flex items-center space-x-2">
-              <Edit className="h-4 w-4" />
-              <span>Edit</span>
-            </TabsTrigger>
-            <TabsTrigger value="preview" className="flex items-center space-x-2">
-              <Eye className="h-4 w-4" />
-              <span>Preview</span>
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-
-        <Dialog>
-          <DialogTrigger asChild>
-            <Button variant="outline" size="sm">
-              <HelpCircle className="h-4 w-4" />
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Markdown Guide</DialogTitle>
-            </DialogHeader>
-            <MarkdownRenderer content={markdownHelp} />
-          </DialogContent>
-        </Dialog>
-      </div>
-
+    <div className={`border rounded-lg ${className}`}>
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsContent value="edit" className="space-y-2">
-          {/* Toolbar */}
-          <div className="flex flex-wrap gap-1 p-2 border rounded-md bg-gray-50">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => insertMarkdown("**text**", "text")}
-              title="Bold"
-            >
-              <strong>B</strong>
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => insertMarkdown("*text*", "text")}
-              title="Italic"
-            >
-              <em>I</em>
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => insertMarkdown("`text`", "text")}
-              title="Code"
-            >
-              {"</>"}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => insertMarkdown("[text](url)", "text")}
-              title="Link"
-            >
-              🔗
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => insertMarkdown("- text", "text")}
-              title="List"
-            >
-              •
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => insertMarkdown("> text", "text")}
-              title="Quote"
-            >
-              "
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => insertMarkdown("```\ntext\n```", "text")}
-              title="Code Block"
-            >
-              {"{}"}
-            </Button>
-          </div>
+        <div className="flex items-center justify-between border-b px-3 py-2">
+          <TabsList className="grid w-fit grid-cols-2">
+            <TabsTrigger value="write">Write</TabsTrigger>
+            <TabsTrigger value="preview">Preview</TabsTrigger>
+          </TabsList>
 
+          {activeTab === "write" && (
+            <div className="flex items-center gap-1">
+              {toolbarButtons.map((button, index) => (
+                <Button
+                  key={index}
+                  variant="ghost"
+                  size="sm"
+                  onClick={button.action}
+                  title={button.label}
+                  className="h-8 w-8 p-0"
+                >
+                  <button.icon className="h-4 w-4" />
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <TabsContent value="write" className="m-0">
           <Textarea
-            data-markdown-editor
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
-            rows={rows}
-            className="font-mono text-sm"
+            className="min-h-[200px] border-0 resize-none focus-visible:ring-0"
           />
         </TabsContent>
 
-        <TabsContent value="preview">
-          <div className="min-h-[200px] p-4 border rounded-md bg-white">
-            {value ? <MarkdownRenderer content={value} /> : <p className="text-gray-500 italic">Nothing to preview</p>}
+        <TabsContent value="preview" className="m-0">
+          <div className="min-h-[200px] p-3">
+            {value ? <MarkdownRenderer content={value} /> : <p className="text-muted-foreground">Nothing to preview</p>}
           </div>
         </TabsContent>
       </Tabs>

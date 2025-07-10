@@ -1,165 +1,86 @@
 "use client"
 
-import type React from "react"
-
-import { useState, useRef } from "react"
+import { useState, useCallback } from "react"
+import { useDropzone } from "react-dropzone"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { Upload, X, File, CheckCircle, AlertCircle } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { toast } from "sonner"
+import { Upload, X, File } from "lucide-react"
 
 interface FileUploadDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId?: number
   taskId?: number
-  commentId?: number
-  onUploadComplete?: () => void
 }
 
-interface UploadFile {
-  file: File
-  id: string
-  progress: number
-  status: "pending" | "uploading" | "success" | "error"
-  error?: string
-}
+export function FileUploadDialog({ open, onOpenChange, projectId, taskId }: FileUploadDialogProps) {
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
 
-export function FileUploadDialog({
-  open,
-  onOpenChange,
-  projectId,
-  taskId,
-  commentId,
-  onUploadComplete,
-}: FileUploadDialogProps) {
-  const [files, setFiles] = useState<UploadFile[]>([])
-  const [isDragging, setIsDragging] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const router = useRouter()
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    setSelectedFiles((prev) => [...prev, ...acceptedFiles])
+  }, [])
 
-  const allowedTypes = [
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "text/plain",
-    "application/zip",
-  ]
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    maxSize: 10 * 1024 * 1024, // 10MB
+    accept: {
+      "image/*": [".png", ".jpg", ".jpeg", ".gif"],
+      "application/pdf": [".pdf"],
+      "application/msword": [".doc"],
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+      "application/vnd.ms-excel": [".xls"],
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+      "text/plain": [".txt"],
+      "application/zip": [".zip"],
+      "application/x-rar-compressed": [".rar"],
+    },
+  })
 
-  const maxFileSize = 10 * 1024 * 1024 // 10MB
-
-  const handleFileSelect = (selectedFiles: FileList | null) => {
-    if (!selectedFiles) return
-
-    const newFiles: UploadFile[] = []
-    Array.from(selectedFiles).forEach((file) => {
-      if (!allowedTypes.includes(file.type)) {
-        alert(`File type ${file.type} is not allowed`)
-        return
-      }
-
-      if (file.size > maxFileSize) {
-        alert(`File ${file.name} is too large. Maximum size is 10MB`)
-        return
-      }
-
-      newFiles.push({
-        file,
-        id: Math.random().toString(36).substring(7),
-        progress: 0,
-        status: "pending",
-      })
-    })
-
-    setFiles((prev) => [...prev, ...newFiles])
+  const removeFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const removeFile = (id: string) => {
-    setFiles((prev) => prev.filter((f) => f.id !== id))
-  }
+  const uploadFiles = async () => {
+    if (selectedFiles.length === 0) return
 
-  const uploadFile = async (uploadFile: UploadFile) => {
-    const formData = new FormData()
-    formData.append("file", uploadFile.file)
-    if (projectId) formData.append("projectId", projectId.toString())
-    if (taskId) formData.append("taskId", taskId.toString())
-    if (commentId) formData.append("commentId", commentId.toString())
+    setUploading(true)
+    setUploadProgress(0)
 
     try {
-      setFiles((prev) => prev.map((f) => (f.id === uploadFile.id ? { ...f, status: "uploading", progress: 0 } : f)))
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i]
+        const formData = new FormData()
+        formData.append("file", file)
+        if (projectId) formData.append("projectId", projectId.toString())
+        if (taskId) formData.append("taskId", taskId.toString())
 
-      const xhr = new XMLHttpRequest()
+        const response = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        })
 
-      xhr.upload.addEventListener("progress", (e) => {
-        if (e.lengthComputable) {
-          const progress = (e.loaded / e.total) * 100
-          setFiles((prev) => prev.map((f) => (f.id === uploadFile.id ? { ...f, progress } : f)))
+        if (!response.ok) {
+          throw new Error(`Failed to upload ${file.name}`)
         }
-      })
 
-      xhr.addEventListener("load", () => {
-        if (xhr.status === 200) {
-          setFiles((prev) => prev.map((f) => (f.id === uploadFile.id ? { ...f, status: "success", progress: 100 } : f)))
-        } else {
-          setFiles((prev) =>
-            prev.map((f) => (f.id === uploadFile.id ? { ...f, status: "error", error: "Upload failed" } : f)),
-          )
-        }
-      })
-
-      xhr.addEventListener("error", () => {
-        setFiles((prev) =>
-          prev.map((f) => (f.id === uploadFile.id ? { ...f, status: "error", error: "Network error" } : f)),
-        )
-      })
-
-      xhr.open("POST", "/api/upload")
-      xhr.send(formData)
-    } catch (error) {
-      setFiles((prev) =>
-        prev.map((f) => (f.id === uploadFile.id ? { ...f, status: "error", error: "Upload failed" } : f)),
-      )
-    }
-  }
-
-  const uploadAll = async () => {
-    const pendingFiles = files.filter((f) => f.status === "pending")
-    for (const file of pendingFiles) {
-      await uploadFile(file)
-    }
-
-    // Check if all uploads completed successfully
-    setTimeout(() => {
-      const allSuccess = files.every((f) => f.status === "success")
-      if (allSuccess) {
-        onUploadComplete?.()
-        onOpenChange(false)
-        setFiles([])
-        router.refresh()
+        setUploadProgress(((i + 1) / selectedFiles.length) * 100)
       }
-    }, 1000)
-  }
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(true)
-  }
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
-  }
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
-    handleFileSelect(e.dataTransfer.files)
+      toast.success("Files uploaded successfully!")
+      setSelectedFiles([])
+      onOpenChange(false)
+      window.location.reload() // Refresh to show new files
+    } catch (error) {
+      console.error("Upload error:", error)
+      toast.error("Failed to upload files")
+    } finally {
+      setUploading(false)
+      setUploadProgress(0)
+    }
   }
 
   const formatFileSize = (bytes: number) => {
@@ -170,92 +91,75 @@ export function FileUploadDialog({
     return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
   }
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "success":
-        return <CheckCircle className="h-4 w-4 text-green-500" />
-      case "error":
-        return <AlertCircle className="h-4 w-4 text-red-500" />
-      default:
-        return <File className="h-4 w-4 text-gray-500" />
-    }
-  }
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Upload Files</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Drop Zone */}
+          {/* Dropzone */}
           <div
-            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-              isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300"
+            {...getRootProps()}
+            className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+              isDragActive ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-gray-400"
             }`}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
           >
-            <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-lg font-medium mb-2">Drop files here or click to browse</p>
-            <p className="text-sm text-gray-500 mb-4">
-              Supported: JPG, PNG, GIF, PDF, DOC, DOCX, XLS, XLSX, TXT, ZIP (Max 10MB)
-            </p>
-            <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}>
-              Choose Files
-            </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
-              onChange={(e) => handleFileSelect(e.target.files)}
-            />
+            <input {...getInputProps()} />
+            <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+            {isDragActive ? (
+              <p>Drop the files here...</p>
+            ) : (
+              <div>
+                <p className="text-lg font-medium">Drop files here or click to browse</p>
+                <p className="text-sm text-gray-500 mt-1">Maximum file size: 10MB</p>
+                <p className="text-xs text-gray-400 mt-1">Supported: Images, PDF, DOC, XLS, TXT, ZIP, RAR</p>
+              </div>
+            )}
           </div>
 
-          {/* File List */}
-          {files.length > 0 && (
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {files.map((file) => (
-                <div key={file.id} className="flex items-center space-x-3 p-3 border rounded-lg">
-                  {getStatusIcon(file.status)}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{file.file.name}</p>
-                    <p className="text-sm text-gray-500">{formatFileSize(file.file.size)}</p>
-                    {file.status === "uploading" && <Progress value={file.progress} className="h-1 mt-1" />}
-                    {file.status === "error" && <p className="text-sm text-red-500">{file.error}</p>}
-                  </div>
-                  {file.status === "pending" && (
-                    <Button type="button" variant="ghost" size="sm" onClick={() => removeFile(file.id)}>
+          {/* Selected Files */}
+          {selectedFiles.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="font-medium">Selected Files ({selectedFiles.length})</h4>
+              <div className="max-h-32 overflow-y-auto space-y-2">
+                {selectedFiles.map((file, index) => (
+                  <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                    <div className="flex items-center gap-2">
+                      <File className="h-4 w-4 text-gray-500" />
+                      <div>
+                        <p className="text-sm font-medium truncate max-w-[200px]">{file.name}</p>
+                        <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                      </div>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => removeFile(index)} disabled={uploading}>
                       <X className="h-4 w-4" />
                     </Button>
-                  )}
-                </div>
-              ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Upload Progress */}
+          {uploading && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Uploading files...</span>
+                <span>{Math.round(uploadProgress)}%</span>
+              </div>
+              <Progress value={uploadProgress} />
             </div>
           )}
 
           {/* Actions */}
-          <div className="flex justify-end space-x-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                onOpenChange(false)
-                setFiles([])
-              }}
-            >
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={uploading}>
               Cancel
             </Button>
-            <Button
-              type="button"
-              onClick={uploadAll}
-              disabled={files.length === 0 || files.every((f) => f.status !== "pending")}
-            >
-              Upload All ({files.filter((f) => f.status === "pending").length})
+            <Button onClick={uploadFiles} disabled={selectedFiles.length === 0 || uploading}>
+              {uploading ? "Uploading..." : `Upload ${selectedFiles.length} file(s)`}
             </Button>
           </div>
         </div>
